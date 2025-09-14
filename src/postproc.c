@@ -4,6 +4,7 @@
 #include "v_video.h"   // SCREENWIDTH, SCREENHEIGHT, I_VideoBuffer
 #include "w_wad.h"
 #include <string.h>
+#include <math.h>
 
 extern int viewwindowx, viewwindowy, viewwidth, viewheight;
 
@@ -154,13 +155,126 @@ static void PP_Blur2(byte *view, int w, int h, int stride, int passes) {
 }
 
 
+static byte *pp_prev = NULL;
 
-
-void ApplyPost(byte *video)
-{
-    // Operate only on the view window so the status bar / borders stay crisp
-    byte *view = video + viewwindowy * SCREENWIDTH + viewwindowx;
-    // PP_BoxBlur8(view, viewwidth, viewheight, SCREENWIDTH, 2);
-    PP_Blur2(view, viewwidth, viewheight, SCREENWIDTH, 2);
+static void PP_MotionBlur(byte *view, int w, int h, int stride, int strength_steps) {
+    if (!pp_prev) {
+        pp_prev = Z_Malloc(SCREENWIDTH*SCREENHEIGHT, PU_STATIC, NULL);
+        // seed prev with first frame of this view rect
+        for (int y = 0; y < h; ++y) memcpy(pp_prev + y*stride, view + y*stride, w);
+        return;
+    }
+    for (int y = 0; y < h; ++y) {
+        byte *cur = view + y*stride;
+        byte *prv = pp_prev + y*stride;
+        for (int x = 0; x < w; ++x) {
+            byte p = cur[x];
+            byte q = prv[x];
+            for (int s = 0; s < strength_steps; ++s) p = blend50(p, q); // repeated 50/50 ≈ stronger mix
+            cur[x] = p;
+            prv[x] = cur[x]; // store blurred result as new previous
+        }
+    }
 }
 
+
+
+
+static void PP_Scanlines(byte *view, int w, int h, int stride, int period, int dark_steps) {
+    for (int y = 0; y < h; ++y) {
+        if ((y % period) != 0) continue;
+        byte *row = view + y*stride;
+        for (int x = 0; x < w; ++x) {
+            byte p = row[x];
+            for (int s = 0; s < dark_steps; ++s) p = blend50(p, 0); // towards palette index 0 (usually black)
+            row[x] = p;
+        }
+    }
+}
+
+
+
+
+static void PP_Vignette(byte *view, int w, int h, int stride, int dark_steps_max) {
+    float cx = (w-1)*0.5f, cy = (h-1)*0.5f;
+    float rmax = sqrtf(cx*cx + cy*cy);
+    for (int y = 0; y < h; ++y) {
+        byte *row = view + y*stride;
+        for (int x = 0; x < w; ++x) {
+            float dx = x - cx, dy = y - cy;
+            int steps = (int)(dark_steps_max * (sqrtf(dx*dx+dy*dy) / rmax));
+            if (steps <= 0) continue;
+            byte p = row[x];
+            while (steps--) p = blend50(p, 0);
+            row[x] = p;
+        }
+    }
+}
+
+
+extern int gametic; // increases each tic
+
+static void PP_Wobble(byte *view, int w, int h, int stride, float amp_px, float freq_rows, float time_speed) {
+    // Use a small temporary row buffer to avoid in-place overwrite artifacts
+    static byte *rowbuf = NULL; if (!rowbuf) rowbuf = Z_Malloc(SCREENWIDTH, PU_STATIC, NULL);
+    float t = gametic * time_speed;
+    for (int y = 0; y < h; ++y) {
+        float phase = t + y * freq_rows;
+        int off = (int)(amp_px * sinf(phase));
+        byte *row = view + y*stride;
+        // copy and wrap
+        for (int x = 0; x < w; ++x) {
+            int sx = x + off;
+            while (sx < 0) sx += w;
+            while (sx >= w) sx -= w;
+            rowbuf[x] = row[sx];
+        }
+        memcpy(row, rowbuf, w);
+    }
+}
+
+
+static int pal_luma_ready; static float pal_luma[256];
+static void ensure_luma(void) {
+    if (pal_luma_ready) return;
+    const byte *playpal = W_CacheLumpName(DEH_String("PLAYPAL"), PU_STATIC);
+    for (int i=0;i<256;i++){
+        float r=playpal[i*3+0]/255.0f, g=playpal[i*3+1]/255.0f, b=playpal[i*3+2]/255.0f;
+        pal_luma[i] = 0.2126f*r + 0.7152f*g + 0.0722f*b;
+    }
+    pal_luma_ready = 1;
+}
+static void PP_Bloom(byte *view, int w, int h, int stride, float thresh, int blur_passes, int add_steps) {
+    ensure_luma(); ensure_tmp();
+    // bright-pass into tmp
+    for (int y=0;y<h;y++){
+        byte *row = view + y*stride, *tmp = pp_tmp + y*stride;
+        for (int x=0;x<w;x++) tmp[x] = pal_luma[row[x]] >= thresh ? row[x] : 0;
+    }
+    // heavy blur on tmp, write result back into tmp
+    for (int i=0;i<blur_passes;i++){ blur_h(view, pp_tmp, w, h, stride); blur_v(pp_tmp, view, w, h, stride); }
+    // add back to view
+    for (int y=0;y<h;y++){
+        byte *dst = view + y*stride, *src = pp_tmp + y*stride;
+        for (int x=0;x<w;x++){
+            byte p = dst[x], q = src[x];
+            for (int s=0;s<add_steps;s++) p = blend50(p, q);
+            dst[x] = p;
+        }
+    }
+}
+
+
+void ApplyPost(byte *video) {
+    byte *view = video + viewwindowy * SCREENWIDTH + viewwindowx;
+    int w = viewwidth, h = viewheight, s = SCREENWIDTH;
+
+    // Example pipeline
+    PP_Blur2(view, w, h, s, 1);               // symmetric softening
+    PP_MotionBlur(view, w, h, s, 1);          // temporal streak
+    PP_Scanlines(view, w, h, s, 2, 1);        // every 2nd row a bit darker
+    PP_Vignette(view, w, h, s, 2);            // gentle corners
+    // Optional fancy
+    // PP_Wobble(view, w, h, s, 2.0f, 0.06f, 0.05f);
+    // PP_Bloom(view, w, h, s, 0.70f, 2, 1);
+}
