@@ -270,11 +270,11 @@ void ApplyPost(byte *video) {
     int w = viewwidth, h = viewheight, s = SCREENWIDTH;
 
     // Example pipeline
-    PP_Blur2(view, w, h, s, 1);               // symmetric softening
-    PP_MotionBlur(view, w, h, s, 1);          // temporal streak
-    PP_Scanlines(view, w, h, s, 2, 1);        // every 2nd row a bit darker
-    PP_Vignette(view, w, h, s, 2);            // gentle corners
+    // PP_Blur2(view, w, h, s, 1);               // symmetric softening
+    PP_MotionBlur(view, w, h, s, 2);          // temporal streak
+    // PP_Scanlines(view, w, h, s, 2, 1);        // every 2nd row a bit darker
+    // PP_Vignette(view, w, h, s, 2);            // gentle corners
     // Optional fancy
-    // PP_Wobble(view, w, h, s, 2.0f, 0.06f, 0.05f);
+    PP_Wobble(view, w, h, s, 4.0f, 0.06f, 0.05f);
     // PP_Bloom(view, w, h, s, 0.70f, 2, 1);
 }
