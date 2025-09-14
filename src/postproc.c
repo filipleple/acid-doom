@@ -101,29 +101,10 @@ void PP_BoxBlur8(byte *buf, int w, int h, int stride, int radius)
     }
 }
 
-void PP_Fog8(byte *buf, int w, int h, int stride, byte fog_index, int strength)
-{
-    if (!buf || !tinttable || strength <= 0) return;
-
-    for (int y = 0; y < h; ++y) {
-        int steps = (y * strength) / h;         // 0 at top -> strength at bottom
-        if (steps <= 0) continue;
-        if (steps > 8) steps = 8;
-
-        byte *row = buf + y * stride;
-        for (int x = 0; x < w; ++x) {
-            byte p = row[x];
-            for (int s = 0; s < steps; ++s) p = blend50(p, fog_index);
-            row[x] = p;
-        }
-    }
-}
-
 void ApplyPost(byte *video)
 {
     // Operate only on the view window so the status bar / borders stay crisp
     byte *view = video + viewwindowy * SCREENWIDTH + viewwindowx;
     PP_BoxBlur8(view, viewwidth, viewheight, SCREENWIDTH, 2);
-    PP_Fog8    (view, viewwidth, viewheight, SCREENWIDTH, /*fog_index=*/0xE7, /*strength=*/6);
 }
 
