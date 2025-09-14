@@ -77,6 +77,13 @@
 
 #include "doom_icon.c"
 
+#include "postproc.h"
+extern pixel_t *I_VideoBuffer;
+
+// If your build does screen wipes, you may want to skip post during wiping.
+// extern int wipegamestate;  // or a similar flag your tree uses
+// extern int gamestate, wipe; // names vary across versions
+
 //
 // D-DoomLoop()
 // Not a globally visible function,
@@ -423,6 +430,7 @@ void D_RunFrame()
                                , 0, 0, SCREENWIDTH, SCREENHEIGHT, tics);
         I_UpdateNoBlit ();
         M_Drawer ();                            // menu is drawn even on top of wipes
+        ApplyPost((byte*)I_VideoBuffer);
         I_FinishUpdate ();                      // page flip or blit buffer
         return;
     }
@@ -445,6 +453,7 @@ void D_RunFrame()
             wipestart = I_GetTime () - 1;
         } else {
             // normal update
+            ApplyPost((byte*)I_VideoBuffer);
             I_FinishUpdate ();              // page flip or blit buffer
         }
     }
