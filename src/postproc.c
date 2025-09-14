@@ -13,6 +13,9 @@ extern int viewwindowx, viewwindowy, viewwidth, viewheight;
 static byte *pp_tinttable = NULL;   // our pointer (don’t use V_LoadTintTable/tinttable)
 static int   pp_tinttable_ready = 0;
 
+
+
+
 static void PP_EnsureTintTable(void)
 {
     if (pp_tinttable_ready) return;
@@ -64,12 +67,16 @@ static void PP_EnsureTintTable(void)
     pp_tinttable_ready = 1;
 }
 
+
+
+
 static inline byte blend50(byte a, byte b)
 {
     PP_EnsureTintTable();
     if (!pp_tinttable) return a; // fail-safe
     return pp_tinttable[(a << 8) | b];
 }
+
 
 
 
@@ -100,6 +107,9 @@ void PP_BoxBlur8(byte *buf, int w, int h, int stride, int radius)
         }
     }
 }
+
+
+
 
 void ApplyPost(byte *video)
 {
