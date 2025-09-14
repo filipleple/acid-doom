@@ -3,6 +3,7 @@
 #include "i_video.h"
 #include "v_video.h"   // SCREENWIDTH, SCREENHEIGHT, I_VideoBuffer
 #include "w_wad.h"
+#include <string.h>
 
 extern int viewwindowx, viewwindowy, viewwidth, viewheight;
 
@@ -109,12 +110,57 @@ void PP_BoxBlur8(byte *buf, int w, int h, int stride, int radius)
 }
 
 
+// At file scope:
+static byte *pp_tmp = NULL;
+
+static void ensure_tmp(void) {
+    if (!pp_tmp) pp_tmp = Z_Malloc(SCREENWIDTH * SCREENHEIGHT, PU_STATIC, NULL);
+}
+
+// Separable 1D 50/50 “box” blur using tmp as the other buffer.
+static inline void blur_h(byte *dst, byte *src, int w, int h, int stride) {
+    for (int y = 0; y < h; ++y) {
+        byte *s = src + y*stride, *d = dst + y*stride;
+        d[0] = s[0];
+        for (int x = 1; x < w-1; ++x) {
+            // 0.5*left + 0.5*right, approximated with two blends
+            byte m = blend50(s[x-1], s[x+1]);
+            d[x] = m;
+        }
+        d[w-1] = s[w-1];
+    }
+}
+static inline void blur_v(byte *dst, byte *src, int w, int h, int stride) {
+    for (int x = 0; x < w; ++x) {
+        dst[x] = src[x];
+        for (int y = 1; y < h-1; ++y) {
+            byte a = src[(y-1)*stride + x];
+            byte b = src[(y+1)*stride + x];
+            dst[y*stride + x] = blend50(a, b);
+        }
+        dst[(h-1)*stride + x] = src[(h-1)*stride + x];
+    }
+}
+static void PP_Blur2(byte *view, int w, int h, int stride, int passes) {
+    ensure_tmp();
+    // copy view rect to tmp
+    for (int y = 0; y < h; ++y) memcpy(pp_tmp + y*stride, view + y*stride, w);
+    for (int i = 0; i < passes; ++i) {
+        blur_h(view, pp_tmp, w, h, stride);
+        blur_v(pp_tmp, view, w, h, stride);
+    }
+    // final is in pp_tmp after last vertical; copy back
+    for (int y = 0; y < h; ++y) memcpy(view + y*stride, pp_tmp + y*stride, w);
+}
+
+
 
 
 void ApplyPost(byte *video)
 {
     // Operate only on the view window so the status bar / borders stay crisp
     byte *view = video + viewwindowy * SCREENWIDTH + viewwindowx;
-    PP_BoxBlur8(view, viewwidth, viewheight, SCREENWIDTH, 2);
+    // PP_BoxBlur8(view, viewwidth, viewheight, SCREENWIDTH, 2);
+    PP_Blur2(view, viewwidth, viewheight, SCREENWIDTH, 2);
 }
 
