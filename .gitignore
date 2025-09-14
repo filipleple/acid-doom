@@ -29,6 +29,9 @@ HTIC*.pcx
 HEXEN*.pcx
 STRIFE*.pcx
 
+*.WAD
+*.wad
+
 # CMake-specific ignores
 /.vs
 /build*
